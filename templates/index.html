@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang='es'>
+<head>
+    <meta charset='UTF-8'>
+    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+    <title>Gestor de Variables</title>
+    <link href='https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap' rel='stylesheet'>
+    
+    <link rel='stylesheet' href="{{ url_for('static', filename='style.css') }}">
+
+    {{ script_block | safe }}
+</head>
+<body>
+    <div class='header-bar'>
+        <h1>Gestor de Variables <span style='font-weight:300; opacity:0.6'>| SESNA</span></h1>
+        <div id='status-indicator' style='font-size:0.8em; color:#10B981'>● Sistema Activo</div>
+    </div>
+
+    <div class='modal-overlay' id='modalOtraOpcion'>
+        <div class='modal-content' style='max-width:450px;'>
+            <div class='modal-header'>
+                <h2 id='modalOtraTitle'>Nueva Opción</h2>
+                <button class='close-button' onclick='handleCloseOtraOpcionModal()'>&times;</button>
+            </div>
+            <div class='form-group'>
+                <label id='modalOtraLabel'>Ingrese el nuevo valor</label>
+                <textarea id='otraOpcionInput' class='form-input' oninput='autoResizeModal(this)'></textarea>
+            </div>
+            <div style='display:flex; gap:12px; margin-top:24px;'>
+                <button class='btn btn-outline' style='flex:1;' onclick='handleCloseOtraOpcionModal()'>Cerrar</button>
+                <button class='btn btn-action' style='flex:1' id='btnConfirmOtra'>Agregar</button>
+            </div>
+        </div>
+    </div>
+
+    <div class='modal-overlay' id='modalSuggestion'>
+        <div class='modal-content' style='max-width:450px;'>
+            <div class='modal-header'>
+                <h2>Sugerencia</h2>
+                <button class='close-button' onclick='closeModal("modalSuggestion")'>&times;</button>
+            </div>
+            <p id='suggestionMessage'></p>
+            <div style='display:flex; gap:12px; margin-top:24px;'>
+                <button class='btn btn-outline' style='flex:1;' id='btnDeclineSuggestion'>Usar mi valor</button>
+                <button class='btn btn-action' style='flex:1' id='btnAcceptSuggestion'>Usar sugerencia</button>
+            </div>
+        </div>
+    </div>
+
+    <div class='modal-overlay' id='modalConfirmUpload'>
+        <div class='modal-content'>
+            <div class='modal-header'>
+                <h2>Confirmar Carga de CSV</h2>
+                <button class='close-button' onclick='closeModal("modalConfirmUpload")'>&times;</button>
+            </div>
+            <p>Se cargará el archivo: <strong id='uploadFileName'></strong>.</p>
+            <div id='uploadProgress' style='display:none; margin-bottom:15px;'>
+                <div class='progress-bar'>
+                    <div id='uploadProgressFill' class='progress-bar-fill' style='width:0%;'></div>
+                </div>
+                <span id='uploadProgressText'>Procesando...</span>
+            </div>
+            <div id='uploadPreviewMessages'></div>
+            <h3>Previsualización de Datos del CSV:</h3>
+            <p style='font-size:0.85em; color:#c00; font-weight:500;'>Filas en rojo = duplicados. Las no duplicadas se insertarán.</p>
+            <div style='margin-bottom:10px;'>
+                <input type='checkbox' id='selectAllDuplicatesForOverwrite'>
+                <label for='selectAllDuplicatesForOverwrite'>Marcar todos los duplicados para sobrescribir (no marcados = ignorar)</label>
+            </div>
+            <div id='uploadDataPreview'></div>
+            <div id='paginationControls'>
+                <button class='btn btn-outline' id='prevPageBtn' disabled>Anterior</button>
+                <span id='pageInfo'>Página 1 de 1</span>
+                <button class='btn btn-outline' id='nextPageBtn' disabled>Siguiente</button>
+            </div>
+            <p style='font-size:0.9em; color:var(--primary); font-weight:500;'>Al confirmar, se insertarán nuevas y se actualizarán duplicados seleccionados.</p>
+            <div style='display:flex; gap:12px; margin-top:24px;'>
+                <button class='btn btn-outline' style='flex:1;' onclick='closeModal("modalConfirmUpload")'>Cancelar</button>
+                <button class='btn btn-success' style='flex:1' onclick='confirmUpload()'>✓ Confirmar Carga</button>
+            </div>
+        </div>
+    </div>
+
+    <div class='modal-overlay' id='modalFolderUpload'>
+        <div class='modal-content'>
+            <div class='modal-header'>
+                <h2>Cargar Carpeta (ZIP)</h2>
+                <button class='close-button' onclick='closeModal("modalFolderUpload")'>&times;</button>
+            </div>
+            <div>
+                <p><strong>Instrucciones:</strong> Selecciona un archivo ZIP que contenga la siguiente estructura:</p>
+                <ul>
+                    <li><code>conjunto_de_datos/</code> (con archivos CSV de datos)</li>
+                    <li><code>diccionario_de_datos/</code> (con archivos CSV de diccionario, formato antiguo o nuevo)</li>
+                    <li><code>metadatos/</code> (opcional, con archivo <code>metadatos.txt</code>)</li>
+                </ul>
+                <p>El sistema detectará automáticamente el formato del diccionario.</p>
+                <input type='file' id='zipFileInput' accept='.zip' onchange='handleZipUpload(this)'>
+                <div id='zipProgress' style='display:none; margin-top:10px;'>
+                    <div class='progress-bar'>
+                        <div id='zipProgressFill' class='progress-bar-fill' style='width:0%;'></div>
+                    </div>
+                    <span id='zipProgressText'>Procesando...</span>
+                </div>
+                <div id='folderLogMessages' style='max-height:250px; overflow-y:auto; background:#f8f9fa; padding:10px; border-radius:6px; border:1px solid var(--border); margin-top:10px; display:none;'>
+                    <pre id='folderLogContent' style='margin:0; font-size:0.85em; white-space:pre-wrap; word-break:break-word;'></pre>
+                </div>
+                <div id='zipPreviewContainer' style='display:none; margin-top:20px;'>
+                    <h3>Previsualización de datos extraídos</h3>
+                    <p style='font-size:0.85em; color:#c00; font-weight:500;'>Filas en rojo = duplicados. Las no duplicadas se insertarán.</p>
+                    <div style='margin-bottom:10px;'>
+                        <input type='checkbox' id='selectAllDuplicatesForOverwriteZip'>
+                        <label for='selectAllDuplicatesForOverwriteZip'>Marcar todos los duplicados para sobrescribir (no marcados = ignorar)</label>
+                    </div>
+                    <p>Filas a agregar: <span id='rowCount'></span></p>
+                    <div id='zipPreviewTable'></div>
+                    <div style='margin-top:15px; display:flex; gap:12px; flex-wrap:wrap;'>
+                        <button class='btn btn-success' onclick='confirmFolderUpload()'>✓ Confirmar carga</button>
+                        <button class='btn btn-outline' onclick='closeModal("modalFolderUpload")'>Cancelar</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id='toast-container'></div>
+
+    <div class='container'>
+        <div class='tool-panel'>
+            <div class='search-wrapper'>
+                <input type='text' id='searchInput' placeholder='Filtrar variables...' onkeyup='handleSearch()'>
+            </div>
+            <div class='button-group'>
+                <input type='file' id='csvFileInput' style='display:none' accept='.csv' onchange='handleFileUpload(this)'>
+                <button class='btn btn-tool' onclick='document.getElementById("csvFileInput").click()' title='Importar CSV'>📤 Importar CSV</button>
+                <button class='btn btn-tool' onclick='openModal("modalFolderUpload")' title='Cargar carpeta ZIP'>📁 Cargar Carpeta</button>
+                <button class='btn btn-tool' onclick='downloadCSV()' title='Exportar CSV'>📥 Descargar CSV</button>
+                <button class='btn btn-action' onclick='duplicateSelected()' title='Duplicar filas seleccionadas'>📋 Duplicar</button>
+                <button class='btn btn-action' onclick='confirmAddRow()' title='Agregar nueva variable'>➕ Nueva Variable</button>
+                <button class='btn btn-tool' onclick='retrainModels()' title='Reentrenar modelos ML'>🔄 Reentrenar Modelos</button>
+                <button class='btn btn-outline' onclick='rollbackModels()' title='Restaurar modelos anteriores'>↩️ Rollback Modelos</button>
+                <button class='btn btn-danger' onclick='deleteSelectedRows()' title='Eliminar filas seleccionadas'>🗑 Eliminar</button>
+            </div>
+        </div>
+
+        <div class='table-card' id='dropZone'>
+            <div class='table-wrapper'>
+                <table id='dataTable'>
+                    <thead><tr id='headerRow'>{{ headers_html | safe }}</tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+            <div class='table-pagination'>
+                <button onclick='prevPage()' id='prevPageBtnTable'>Anterior</button>
+                <span>
+                    Página <input type='number' id='pageInput' value='1' min='1' onchange='goToPage(this.value)'>
+                    de <span id='totalPagesSpan'>1</span>
+                </span>
+                <select id='itemsPerPageSelect' onchange='changeItemsPerPage(this.value)'>
+                    <option value='10'>10</option>
+                    <option value='25'>25</option>
+                    <option value='50'>50</option>
+                    <option value='100'>100</option>
+                </select>
+                <button onclick='nextPage()' id='nextPageBtnTable'>Siguiente</button>
+            </div>
+        </div>
+
+        <div id='historyContainer'>
+            <h3>Historial de cargas</h3>
+            <div id='historyList'>
+                <p style='color:var(--text-muted);'>Cargando historial...</p>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='main.js') }}"></script>
+</body>
+</html>
