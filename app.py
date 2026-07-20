@@ -637,18 +637,87 @@ def duplicate_var(id_val):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/api/catalog/<table_name>', methods=['POST'])
-def add_catalog_option(table_name):
+
+@app.route('/api/upload', methods=['POST'])
+def upload_file():
     try:
-        value = request.json.get('value', '').strip()
-        all_options = _get_catalog_options(table_name)
-        match_val, score = _find_best_value_match(value, all_options, threshold=0.95)
-        if score == 1.0: return jsonify({"status": "already_exists", "value": match_val}), 200
-        elif score > 0.7: return jsonify({"status": "suggestion", "original_input": value, "suggested_value": match_val}), 200
-        res = supabase.from_(table_name).insert({"name": value}).execute()
-        return jsonify({"status": "inserted", "value": res.data[0]['name']}), 201
+        # 1. CASO DE CONFIRMACIÓN: El frontend solo envía las acciones a guardar (sin archivo)
+        actions_str = request.form.get('actions_for_rows')
+        if actions_str:
+            actions = json.loads(actions_str)
+            data_to_insert, data_to_update = [], []
+            used_ids = set(_get_all_existing_ids())
+
+            for a in actions:
+                row_data = rellenar_categorias(a['data'])
+                if a['action'] == 'insert':
+                    row_data['id'] = generar_siguiente_id(used_ids, set())
+                    used_ids.add(row_data['id'])
+                    data_to_insert.append({k: str(v) if not pd.isna(v) else None for k, v in row_data.items()})
+                elif a['action'] == 'overwrite':
+                    row_data['id'] = a.get('_supabase_matching_id')
+                    data_to_update.append({k: str(v) if not pd.isna(v) else None for k, v in row_data.items() if k in EXPECTED_COLUMNS})
+
+            inserted, updated = 0, 0
+            if data_to_insert:
+                ins_res = supabase.from_('variables').insert(data_to_insert).execute()
+                inserted = len(ins_res.data) if ins_res.data else 0
+            if data_to_update:
+                for row in data_to_update:
+                    supabase.from_('variables').update(row).eq('id', row.pop('id')).execute()
+                    updated += 1
+
+            file_name = request.form.get('zip_filename', 'carga_web')
+            supabase.from_('cargas').insert({
+                'fecha': datetime.datetime.now().isoformat(), 'archivo': file_name,
+                'filas_agregadas': inserted, 'estado': 'completado' if inserted > 0 else 'error'
+            }).execute()
+
+            return jsonify({"status": "ok", "message": f"Insertadas: {inserted}. Actualizadas: {updated}."}), 200
+
+        # 2. CASO DE VISTA PREVIA: El frontend envía un archivo (CSV o ZIP) para analizar
+        file = request.files.get('file')
+        if not file:
+            return jsonify({"error": "No se recibió ningún archivo ni acciones de carga."}), 400
+
+        df = None
+        filename = file.filename
+
+        if filename.endswith('.csv'):
+            # Si es CSV normal, lo leemos directamente
+            df = pd.read_csv(io.BytesIO(file.read()), encoding='utf-8-sig')
+        
+        elif filename.endswith('.zip'):
+            # Si es ZIP, lo abrimos en la memoria sin extraerlo al disco duro
+            with zipfile.ZipFile(file, 'r') as z:
+                # Buscamos todos los archivos que terminen en .csv adentro del ZIP
+                csv_files = [f for f in z.namelist() if f.endswith('.csv')]
+                
+                if not csv_files:
+                    return jsonify({"error": "No se encontraron archivos CSV dentro de la carpeta ZIP"}), 400
+                
+                # Leemos el primer archivo CSV que encontró dentro del ZIP
+                with z.open(csv_files[0]) as f:
+                    df = pd.read_csv(f, encoding='utf-8-sig')
+        else:
+            return jsonify({"error": "El archivo debe tener formato .csv o .zip"}), 400
+        
+        # Procesamiento y limpieza de datos (reutilizando tu lógica)
+        extracted_year = re.search(r'(19|20)\d{2}', filename)
+        if extracted_year and ('año' not in df.columns or df['año'].isna().all()):
+            df['año'] = extracted_year.group(0)
+
+        processed_rows, messages = _process_csv_data(df, _get_all_variables_data(), debug=True)
+
+        return jsonify({
+            "status": "preview", 
+            "messages": messages, 
+            "preview_data": _clean_data_for_json(processed_rows),
+            "zip_filename": filename
+        }), 200
+
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": str(e), "traceback": traceback.format_exc()}), 500
 
 @app.route('/api/upload', methods=['POST'])
 def upload_csv():
