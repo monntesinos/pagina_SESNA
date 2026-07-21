@@ -399,17 +399,37 @@ function renderTable() {
                     (col.options || []).forEach(o => htmlOpts += `<option value="${escapeHtml(o)}" ${o===val?'selected':''}>${escapeHtml(o)}</option>`);
                     htmlOpts += `<option value="_OTRA_">Otra...</option>`;
                     el.innerHTML = htmlOpts;
+                    
                     el.onchange = async () => {
                         if (el.value === '_OTRA_') {
                             openOpcionesModal(col, rowData.id,
-                                (newVal) => { rowData[col.keyName] = newVal; handleSearch(); },
-                                () => { el.value = val; }
+                                (newVal) => { 
+                                    // 1. Actualizamos el dato en memoria sin recargar todo
+                                    rowData[col.keyName] = newVal; 
+                                    
+                                    // 2. Reconstruimos las opciones solo para este select específico
+                                    let newOpts = `<option value="">-seleccionar-</option>`;
+                                    (col.options || []).forEach(o => {
+                                        newOpts += `<option value="${escapeHtml(o)}" ${o === newVal ? 'selected' : ''}>${escapeHtml(o)}</option>`;
+                                    });
+                                    newOpts += `<option value="_OTRA_">Otra...</option>`;
+                                    
+                                    el.innerHTML = newOpts;
+                                    el.value = newVal; // Aseguramos que se vea seleccionado
+                                    val = newVal;      // Sincronizamos la variable local
+                                    
+                                    if (col.keyName === 'eje') updateTemaOptions(tr, newVal, rowData['tema']);
+                                },
+                                () => { 
+                                    el.value = val; // Restaurar si el usuario cancela
+                                }
                             );
                         } else {
                             rowData[col.keyName] = el.value;
                             if (col.keyName === 'eje') updateTemaOptions(tr, el.value, rowData['tema']);
                             await saveRow(tr);
                             syncRowHeights(tr);
+                            val = el.value;
                         }
                     };
                     requestAnimationFrame(() => {
@@ -797,7 +817,7 @@ async function handleZipUpload(input) {
             progressText.textContent = `Procesando... ${Math.round(progress)}%`;
         }, 300);
 
-        const response = await fetch('/api/upload', {
+        const response = await fetch('/api/process-folder', {
             method: 'POST',
             body: formData
         });
@@ -872,7 +892,7 @@ async function confirmFolderUpload() {
     fd.append('zip_filename', currentZipFilename || 'carga_carpeta');
 
     try {
-        const response = await fetch('/api/upload', {
+        const response = await fetch('/api/confirm-folder', {
             method: 'POST',
             body: fd
         });
